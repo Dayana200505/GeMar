@@ -5,7 +5,7 @@ import { HiMenuAlt3, HiX } from 'react-icons/hi';
 
 const links = [
   { name: 'Inicio', href: '/' },
-  { name: 'Generar reporte', href: '/generar-reportes' },
+  { name: 'Generar reporte', href: '/elegir-gestion' },
   { name: 'Ver información', href: '/ver-informacion' },
 ];
 
@@ -13,7 +13,7 @@ export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <nav className="bg-[#A31621] shadow-sm fixed w-full z-10">
+    <nav className="bg-[#A31621] fixed top-0 w-full z-50 shadow-md">
       <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
         <div className="text-2xl font-bold text-[#FCF7F8]">Mar del Plata</div>
 
