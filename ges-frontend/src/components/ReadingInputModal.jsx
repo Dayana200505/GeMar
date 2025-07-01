@@ -5,12 +5,6 @@ const ReadingInputModal = ({ isOpen, onClose, onSubmit }) => {
   const [reading1, setReading1] = useState('');
   const [reading2, setReading2] = useState('');
 
-  const handleSubmit = () => {
-    const total = (parseFloat(reading1) || 0) + (parseFloat(reading2) || 0);
-    if (total > 0) {
-      onSubmit(total.toFixed(2));
-    }
-  };
 
   if (!isOpen) return null;
 
@@ -56,7 +50,7 @@ const ReadingInputModal = ({ isOpen, onClose, onSubmit }) => {
             className="px-4 py-2 bg-[#A31621] text-white rounded"
             disabled={!reading1 || !reading2}
           >
-            Enviar
+            Guardar
           </button>
         </div>
       </div>

@@ -69,7 +69,7 @@ const CurrentReadingModal = ({ isOpen, onClose, onSubmit, department }) => {
             className="px-4 py-2 bg-[#A31621] text-white rounded"
             disabled={!currentReading}
           >
-            Enviar
+            Guardar
           </button>
         </div>
       </div>

@@ -1,51 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 import CurrentReadingModal from '../components/CurrentReadingModal';
 import ReadingInputModal from '../components/ReadingInputModal';
 import SaveSuccessModal from '../components/SaveSuccessModal';
 import ExportSuccessModal from '../components/ExportSuccessModal ';
+import PreviousReadingModal from '../components/PreviousReadingModal';
 
 
-const departments = [
+const DEPARTMENTS = [
   'PB-A', 'PB-B', '1-A', '1-B', '2-A', '2-B', '3-A', '3-B',
-  '4-A', '4-B', '5-A', '5-B', '6-A', '6-B',
+  '4-A', '4-B', '5-A', '5-B', '6-A', '6-B', 'GENERAL',
 ];
+const MODAL_TIMEOUT = 2000; // 2 seconds
+const TEMPLATE_PATH = 'plantillas/PlantillaGeMar.xlsx';
 
-const PREVIOUS_READING = 10.02;
+const textVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.8, ease: 'easeOut' },
+  },
+};
+
+
 
 const GenerarReportes = () => {
+  // State management
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [previousReadings, setPreviousReadings] = useState({}); // Store previous readings per department
   const [readingInputs, setReadingInputs] = useState({ lectura1: '', lectura2: '', total: null });
   const [totalReading, setTotalReading] = useState(null);
   const [currentReadings, setCurrentReadings] = useState({});
   const [currentDeptIndex, setCurrentDeptIndex] = useState(0);
-  const [showReadingModal, setShowReadingModal] = useState(true);
+  const [showPreviousReadingModal, setShowPreviousReadingModal] = useState(false);
+  const [selectedDepartment, setSelectedDepartment] = useState(null); // Track department for previous reading modal
+  const [showReadingModal, setShowReadingModal] = useState(false);
   const [showCurrentModal, setShowCurrentModal] = useState(false);
   const [showSaveSuccessModal, setShowSaveSuccessModal] = useState(false);
   const [showExportSuccessModal, setShowExportSuccessModal] = useState(false);
 
-  const textVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.8, ease: 'easeOut' },
-    },
-  };
-
-  const consumptionData = departments.map(dept => {
+  // Derived data
+  const consumptionData = DEPARTMENTS.map(dept => {
     const current = parseFloat(currentReadings[dept]) || 0;
-    const consumption = current ? (current - PREVIOUS_READING).toFixed(2) : '';
-    return { dept, current, consumption };
+    const previous = parseFloat(previousReadings[dept]) || 0;
+    const consumption = current && previousReadings[dept] ? (current - previous).toFixed(2) : '';
+    return { dept, current, previous, consumption };
   });
 
-  const totalConsumption = consumptionData.reduce((sum, data) => sum + (parseFloat(data.consumption) || 0), 0).toFixed(2);
-  const unitPrice = totalReading && totalConsumption ? (parseFloat(totalReading) / parseFloat(totalConsumption)).toFixed(2) : 0;
+  const totalConsumption = consumptionData
+    .reduce((sum, data) => sum + (parseFloat(data.consumption) || 0), 0)
+    .toFixed(2);
 
+  const unitPrice = totalReading && totalConsumption 
+    ? (parseFloat(totalReading) / parseFloat(totalConsumption)).toFixed(2) 
+    : '0.00';
+
+  // Utility functions
   const getPeriodo = (fecha) => {
-    const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+    const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", 
+                   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
     const d = new Date(fecha);
     if (isNaN(d)) return '';
     const mes2 = meses[d.getMonth()];
@@ -62,6 +79,12 @@ const GenerarReportes = () => {
     return `${dia}/${mes}/${año}`;
   };
 
+  // Handlers
+  const handlePreviousReadingSubmit = (department, reading) => {
+    setPreviousReadings(prev => ({ ...prev, [department]: parseFloat(reading).toFixed(2) }));
+    setShowPreviousReadingModal(false);
+  };
+
   const handleReadingSubmit = (lectura1, lectura2) => {
     const l1 = parseFloat(lectura1) || 0;
     const l2 = parseFloat(lectura2) || 0;
@@ -73,8 +96,8 @@ const GenerarReportes = () => {
   };
 
   const handleCurrentReadingSubmit = (reading) => {
-    setCurrentReadings(prev => ({ ...prev, [departments[currentDeptIndex]]: reading }));
-    if (currentDeptIndex < departments.length - 1) {
+    setCurrentReadings(prev => ({ ...prev, [DEPARTMENTS[currentDeptIndex]]: reading }));
+    if (currentDeptIndex < DEPARTMENTS.length - 1) {
       setCurrentDeptIndex(prev => prev + 1);
     } else {
       setShowCurrentModal(false);
@@ -83,76 +106,174 @@ const GenerarReportes = () => {
 
   const handleSave = () => {
     setShowSaveSuccessModal(true);
-    setTimeout(() => setShowSaveSuccessModal(false), 2000);
+    setTimeout(() => setShowSaveSuccessModal(false), MODAL_TIMEOUT);
   };
 
-  const handleExportToExcel = () => {
-    const wsData = [
-      ['FECHA', 'DPTO', 'LECTURA 1', 'LECTURA 2', 'TOTAL LECTURA', 'ACTUAL', 'ANTERIOR', 'CONSUMO', 'PRECIO CUBO', 'TOTAL Bs', 'TOTAL Bs (Redondeado)'],
-      ...consumptionData.map(data => {
-        const totalBs = data.consumption ? (parseFloat(data.consumption) * unitPrice).toFixed(2) : '';
-        const roundedTotal = totalBs ? Math.round(totalBs) : '';
-        return [
-          formatFecha(selectedDate),
-          data.dept,
-          readingInputs.lectura1,
-          readingInputs.lectura2,
-          readingInputs.total,
-          data.current !== '' && data.current !== undefined ? parseFloat(data.current).toFixed(2) : '',
-          PREVIOUS_READING,
-          data.consumption,
-          unitPrice,
-          totalBs,
-          roundedTotal
-        ];
-      })
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, `Reporte_${getPeriodo(selectedDate)}`);
-    XLSX.writeFile(wb, `Reporte_${getPeriodo(selectedDate)}.xlsx`);
-    setShowExportSuccessModal(true);
-    setTimeout(() => setShowExportSuccessModal(false), 2000);
+  const handleExportWithTemplate = async () => {
+    try {
+      // 1. Cargar plantilla
+      const response = await fetch(TEMPLATE_PATH);
+      const arrayBuffer = await response.arrayBuffer();
+  
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(arrayBuffer);
+      const worksheet = workbook.getWorksheet(1);
+  
+      // 2. Título del informe
+      worksheet.getCell('E1').value = `Mes del informe: ${getPeriodo(selectedDate)}`;
+      worksheet.getCell('E1').font = { bold: true, size: 14 };
+      worksheet.getCell('E1').alignment = { vertical: 'middle', horizontal: 'left' };
+  
+      // 3. Insertar datos
+      let totalConsumo = 0;
+      let totalBs = 0;
+      let totalBsRedondeado = 0;
+  
+      consumptionData.forEach((data, index) => {
+        const fila = index + 3;
+  
+        const actual = parseFloat(data.current) || 0;
+        const anterior = parseFloat(data.previous) || 0;
+        const consumo = parseFloat((actual - anterior).toFixed(2));
+        const totalFilaBs = parseFloat((consumo * parseFloat(unitPrice)).toFixed(2));
+        const totalFilaRedondeado = Math.round(totalFilaBs);
+  
+        worksheet.getCell(`A${fila}`).value = formatFecha(selectedDate);
+        worksheet.getCell(`B${fila}`).value = data.dept;
+        worksheet.getCell(`C${fila}`).value = actual;
+        worksheet.getCell(`D${fila}`).value = anterior;
+        worksheet.getCell(`E${fila}`).value = consumo;
+        worksheet.getCell(`F${fila}`).value = parseFloat(unitPrice);
+        worksheet.getCell(`G${fila}`).value = totalFilaBs;
+        worksheet.getCell(`H${fila}`).value = totalFilaRedondeado;
+  
+        totalConsumo += consumo;
+        totalBs += totalFilaBs;
+        totalBsRedondeado += totalFilaRedondeado;
+      });
+  
+      // 4. Insertar lecturas
+      const lectura1 = parseFloat(readingInputs.lectura1) || 0;
+      const lectura2 = parseFloat(readingInputs.lectura2) || 0;
+      const lecturaTotal = lectura1 + lectura2;
+  
+      worksheet.getCell('J3').value = lectura1;
+      worksheet.getCell('J4').value = lectura2;
+      worksheet.getCell('J5').value = lecturaTotal;
+      worksheet.getCell('J6').value = parseFloat(totalConsumo.toFixed(2));
+      worksheet.getCell('J7').value = totalConsumo !== 0 ? parseFloat((lecturaTotal / totalConsumo).toFixed(2)) : 0;
+  
+      // 5. Totales
+      worksheet.getCell('E18').value = parseFloat(totalConsumo.toFixed(2));
+      worksheet.getCell('G18').value = parseFloat(totalBs.toFixed(2));
+      worksheet.getCell('H18').value = totalBsRedondeado;
+  
+      // 6. Exportar
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+  
+      saveAs(blob, `ReporteGeMar_${getPeriodo(selectedDate)}.xlsx`);
+      setShowExportSuccessModal(true);
+      setTimeout(() => setShowExportSuccessModal(false), 2000);
+  
+    } catch (error) {
+      console.error('Error exportando con plantilla:', error);
+      alert('Error al exportar Excel con plantilla.');
+    }
   };
-
+  
+  
+  // Render
   return (
     <div className="min-h-screen bg-gray-100 p-6 sm:p-10 md:p-20">
-      <ReadingInputModal isOpen={showReadingModal} onClose={() => setShowReadingModal(false)} onSubmit={handleReadingSubmit} />
-      <CurrentReadingModal isOpen={showCurrentModal} onClose={() => setShowCurrentModal(false)} onSubmit={handleCurrentReadingSubmit} department={departments[currentDeptIndex]} />
-      <SaveSuccessModal isOpen={showSaveSuccessModal} onClose={() => setShowSaveSuccessModal(false)} message="¡Se guardó exitosamente!" />
-      <ExportSuccessModal isOpen={showExportSuccessModal} onClose={() => setShowExportSuccessModal(false)} message="¡Se descargó correctamente!" />
+      {/* Modals */}
+      <PreviousReadingModal 
+        isOpen={showPreviousReadingModal} 
+        onClose={() => setShowPreviousReadingModal(false)} 
+        onSubmit={handlePreviousReadingSubmit}
+        department={selectedDepartment}
+      />
+      <ReadingInputModal 
+        isOpen={showReadingModal} 
+        onClose={() => setShowReadingModal(false)} 
+        onSubmit={handleReadingSubmit} 
+      />
+      <CurrentReadingModal 
+        isOpen={showCurrentModal} 
+        onClose={() => setShowCurrentModal(false)} 
+        onSubmit={handleCurrentReadingSubmit} 
+        department={DEPARTMENTS[currentDeptIndex]} 
+      />
+      <SaveSuccessModal 
+        isOpen={showSaveSuccessModal} 
+        onClose={() => setShowSaveSuccessModal(false)} 
+        message="¡Se guardó exitosamente!" 
+      />
+      <ExportSuccessModal
+        isOpen={showExportSuccessModal} 
+        onClose={() => setShowExportSuccessModal(false)} 
+        message="¡Se descargó correctamente!" 
+      />
 
-      <motion.div className="flex items-center justify-center mb-8" variants={textVariants} initial="hidden" animate="visible">
+      {/* Header */}
+      <motion.div 
+        className="flex items-center justify-center mb-8" 
+        variants={textVariants} 
+        initial="hidden" 
+        animate="visible"
+      >
         <h1 className="text-3xl sm:text-4xl font-bold text-[#A31621] font-[Poppins] text-center">
           Informe del Mes: {getPeriodo(selectedDate)}
         </h1>
       </motion.div>
 
-      <div className="mb-6 bg-white p-4 rounded shadow-md">
-        <h2 className="text-lg font-semibold mb-2 text-[#162c3b]">Lecturas Ingresadas</h2>
-        <p>Lectura 1: <span className="font-medium">{readingInputs.lectura1 || '--'}</span></p>
-        <p>Lectura 2: <span className="font-medium">{readingInputs.lectura2 || '--'}</span></p>
-        <p>Total: <span className="font-medium">{readingInputs.total || '--'}</span></p>
-      </div>
+     {/* Readings Display */}
+<div className="mb-4 bg-white p-3 rounded-lg shadow-sm">
+  <div className="flex items-center justify-between mb-3">
+    <h2 className="text-base font-semibold text-[#162c3b]">Lecturas Ingresadas</h2>
+  </div>
+  <div className="text-sm text-gray-700 grid grid-cols-3 gap-y-1">
+    <p>Lectura 1: <span className="font-medium">{readingInputs.lectura1 || '--'}</span></p>
+    <p>Lectura 2: <span className="font-medium">{readingInputs.lectura2 || '--'}</span></p>
+    <p>Total: <span className="font-medium">{readingInputs.total || '--'}</span></p>
+  </div>
 
-      <div className="mb-4 flex justify-end space-x-4">
-        <button className="bg-[#162c3b] text-white px-4 py-2 rounded hover:bg-[#A31621] transition-colors" onClick={handleSave}>Guardar</button>
-        <button className="bg-[#162c3b] text-white px-4 py-2 rounded hover:bg-[#A31621] transition-colors" onClick={handleExportToExcel}>Descargar Excel</button>
-      </div>
+  {/* Action Buttons */}
+  <div className="flex flex-wrap justify-end gap-2 mt-4">
+    <button 
+      className="bg-[#162c3b] text-white px-3 py-1.5 rounded text-sm hover:bg-[#1f3e56] transition-colors"
+      onClick={() => setShowReadingModal(true)}
+    >
+      Ingresar Lecturas
+    </button>
+    <button 
+      className="bg-[#A31621] text-white px-3 py-1.5 rounded text-sm hover:bg-[#c4313b] transition-colors"
+      onClick={handleSave}
+    >
+      Guardar
+    </button>
+    <button 
+      className="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700 transition-colors"
+      onClick={handleExportWithTemplate}
+    >
+      Descargar Excel
+    </button>
+  </div>
+</div>
 
+      {/* Consumption Table */}
       <div className="overflow-x-auto shadow-lg rounded-lg">
         <table className="w-full border-collapse bg-white">
           <thead className="bg-[#162c3b] text-white">
             <tr>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">FECHA</th>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">DPTO</th>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">ACTUAL</th>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">ANTERIOR</th>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">CONSUMO</th>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">PRECIO CUBO</th>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">TOTAL Bs</th>
-              <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">TOTAL Bs (Redondeado)</th>
+              {['FECHA', 'DPTO', 'ACTUAL', 'ANTERIOR', 'CONSUMO', 'PRECIO CUBO', 'TOTAL Bs', 'TOTAL Bs (Redondeado)']
+                .map(header => (
+                  <th key={header} className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold">
+                    {header}
+                  </th>
+                ))}
             </tr>
           </thead>
           <tbody>
@@ -163,8 +284,21 @@ const GenerarReportes = () => {
                 <tr key={index} className="hover:bg-gray-50 transition-colors">
                   <td className="border border-gray-300 px-4 py-2 text-gray-800">{formatFecha(selectedDate)}</td>
                   <td className="border border-gray-300 px-4 py-2 text-gray-800 font-medium">{data.dept}</td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800 cursor-pointer hover:underline" onClick={() => { setCurrentDeptIndex(index); setShowCurrentModal(true); }}>{data.current !== '' && data.current !== undefined ? parseFloat(data.current).toFixed(2) : ''}</td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">{PREVIOUS_READING}</td>
+                  <td 
+                    className="border border-gray-300 px-4 py-2 text-gray-800 cursor-pointer hover:underline" 
+                    onClick={() => { setCurrentDeptIndex(index); setShowCurrentModal(true); }}
+                  >
+                    {data.current ? parseFloat(data.current).toFixed(2) : ''}
+                  </td>
+                  <td 
+                    className="border border-gray-300 px-4 py-2 text-gray-800 cursor-pointer hover:underline"
+                    onClick={() => {
+                      setSelectedDepartment(data.dept);
+                      setShowPreviousReadingModal(true);
+                    }}
+                  >
+                    {data.previous ? parseFloat(data.previous).toFixed(2) : '--'}
+                  </td>
                   <td className="border border-gray-300 px-4 py-2 text-gray-800">{data.consumption}</td>
                   <td className="border border-gray-300 px-4 py-2 text-gray-800">{unitPrice}</td>
                   <td className="border border-gray-300 px-4 py-2 text-gray-800">{totalBs}</td>
@@ -176,8 +310,15 @@ const GenerarReportes = () => {
               <td colSpan="4" className="border border-gray-300 px-4 py-2 text-right">Total:</td>
               <td className="border border-gray-300 px-4 py-2">{totalConsumption}</td>
               <td className="border border-gray-300 px-4 py-2"></td>
-              <td className="border border-gray-300 px-4 py-2">{consumptionData.reduce((sum, data) => sum + (parseFloat(data.consumption) * unitPrice || 0), 0).toFixed(2)}</td>
-              <td className="border border-gray-300 px-4 py-2">{consumptionData.reduce((sum, data) => { const totalBs = parseFloat(data.consumption) * unitPrice || 0; return sum + (totalBs ? Math.round(totalBs) : 0); }, 0)}</td>
+              <td className="border border-gray-300 px-4 py-2">
+                {consumptionData.reduce((sum, data) => sum + (parseFloat(data.consumption) * unitPrice || 0), 0).toFixed(2)}
+              </td>
+              <td className="border border-gray-300 px-4 py-2">
+                {consumptionData.reduce((sum, data) => {
+                  const totalBs = parseFloat(data.consumption) * unitPrice || 0;
+                  return sum + (totalBs ? Math.round(totalBs) : 0);
+                }, 0)}
+              </td>
             </tr>
           </tbody>
         </table>
