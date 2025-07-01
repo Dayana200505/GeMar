@@ -1,12 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 
 const CurrentReadingModal = ({ isOpen, onClose, onSubmit, department }) => {
   const [currentReading, setCurrentReading] = useState('');
 
+  useEffect(() => {
+    if (isOpen) setCurrentReading('');
+  }, [isOpen, department]);
+
+  const handleChange = (e) => {
+    const value = e.target.value;
+    // Allow empty input or any valid number (including decimals)
+    if (value === '' || /^-?\d*\.?\d*$/.test(value)) {
+      setCurrentReading(value);
+    }
+  };
+
+  const handleBlur = () => {
+    const parsed = parseFloat(currentReading);
+    if (!isNaN(parsed)) {
+      setCurrentReading(parsed.toFixed(2));
+    } else if (currentReading === '') {
+      setCurrentReading('');
+    }
+  };
+
   const handleSubmit = () => {
-    if (currentReading) {
-      onSubmit(parseFloat(currentReading).toFixed(2));
+    const parsed = parseFloat(currentReading);
+    if (!isNaN(parsed)) {
+      onSubmit(parsed.toFixed(2));
     }
   };
 
@@ -23,11 +45,14 @@ const CurrentReadingModal = ({ isOpen, onClose, onSubmit, department }) => {
           Ingresar lectura actual para <strong>{department}</strong>
         </h2>
         <div className="mb-4">
+          <label className="block mb-2">Lectura</label>
           <input
             type="number"
             step="0.01"
+            min="0"
             value={currentReading}
-            onChange={(e) => setCurrentReading(e.target.value)}
+            onChange={handleChange}
+            onBlur={handleBlur}
             className="w-full p-2 border rounded"
             placeholder="0.00"
           />

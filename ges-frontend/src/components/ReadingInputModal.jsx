@@ -52,7 +52,7 @@ const ReadingInputModal = ({ isOpen, onClose, onSubmit }) => {
             Cancelar
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={() => onSubmit(reading1, reading2)}
             className="px-4 py-2 bg-[#A31621] text-white rounded"
             disabled={!reading1 || !reading2}
           >

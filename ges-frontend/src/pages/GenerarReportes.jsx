@@ -9,24 +9,27 @@ const departments = [
   '4-A', '4-B', '5-A', '5-B', '6-A', '6-B',
 ];
 
+const PREVIOUS_READING = 10.02;
+
 const GenerarReportes = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [readingInputs, setReadingInputs] = useState({
+    lectura1: '',
+    lectura2: '',
+    total: null,
+  });
   const [totalReading, setTotalReading] = useState(null);
   const [currentReadings, setCurrentReadings] = useState({});
   const [currentDeptIndex, setCurrentDeptIndex] = useState(0);
   const [showReadingModal, setShowReadingModal] = useState(true);
   const [showCurrentModal, setShowCurrentModal] = useState(false);
 
-  const PREVIOUS_READING = 10.02;
-
-  // Calculate consumption data
   const consumptionData = departments.map(dept => {
     const current = parseFloat(currentReadings[dept]) || 0;
     const consumption = current ? (current - PREVIOUS_READING).toFixed(2) : '';
     return { dept, current, consumption };
   });
 
-  // Calculate totals
   const totalConsumption = consumptionData
     .reduce((sum, data) => sum + (parseFloat(data.consumption) || 0), 0)
     .toFixed(2);
@@ -54,25 +57,30 @@ const GenerarReportes = () => {
     return `${dia}/${mes}/${año}`;
   };
 
-  const handleReadingSubmit = (total) => {
+  const handleReadingSubmit = (lectura1, lectura2) => {
+    const l1 = parseFloat(lectura1) || 0;
+    const l2 = parseFloat(lectura2) || 0;
+    const total = (l1 + l2).toFixed(2);
+    setReadingInputs({ lectura1: l1.toFixed(2), lectura2: l2.toFixed(2), total });
     setTotalReading(total);
     setShowReadingModal(false);
     setShowCurrentModal(true);
   };
 
+
   const handleCurrentReadingSubmit = (reading) => {
     setCurrentReadings(prev => ({
       ...prev,
-      [departments[currentDeptIndex]]: reading
+      [departments[currentDeptIndex]]: reading,
     }));
-    
+  
+    // Avanza al siguiente automáticamente
     if (currentDeptIndex < departments.length - 1) {
       setCurrentDeptIndex(prev => prev + 1);
     } else {
-      setShowCurrentModal(false);
+      setShowCurrentModal(false); // último departamento
     }
   };
-
   const textVariants = {
     hidden: { opacity: 0, y: 20 },
     visible: {
@@ -108,6 +116,13 @@ const GenerarReportes = () => {
         </h1>
       </motion.div>
 
+      <div className="mb-6 bg-white p-4 rounded shadow-md">
+        <h2 className="text-lg font-semibold mb-2 text-[#162c3b]">Lecturas Ingresadas</h2>
+        <p>Lectura 1: <span className="font-medium">{readingInputs.lectura1 || '--'}</span></p>
+        <p>Lectura 2: <span className="font-medium">{readingInputs.lectura2 || '--'}</span></p>
+        <p>Total: <span className="font-medium">{readingInputs.total || '--'}</span></p>
+      </div>
+
       <div className="overflow-x-auto shadow-lg rounded-lg">
         <table className="w-full border-collapse bg-white">
           <thead className="bg-[#162c3b] text-white">
@@ -126,7 +141,7 @@ const GenerarReportes = () => {
             {consumptionData.map((data, index) => {
               const totalBs = data.consumption ? (parseFloat(data.consumption) * unitPrice).toFixed(2) : '';
               const roundedTotal = totalBs ? Math.round(totalBs) : '';
-              
+
               return (
                 <tr key={index} className="hover:bg-gray-50 transition-colors">
                   <td className="border border-gray-300 px-4 py-2 text-gray-800">
@@ -135,9 +150,17 @@ const GenerarReportes = () => {
                   <td className="border border-gray-300 px-4 py-2 text-gray-800 font-medium">
                     {data.dept}
                   </td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">
-                    {data.current || ''}
-                  </td>
+                  <td
+                  className="border border-gray-300 px-4 py-2 text-gray-800 cursor-pointer hover:underline"
+                  onClick={() => {
+                    setCurrentDeptIndex(index);
+                    setShowCurrentModal(true);
+                  }}
+                >
+                  {data.current !== '' && data.current !== undefined
+                    ? parseFloat(data.current).toFixed(2)
+                    : ''}
+                </td>
                   <td className="border border-gray-300 px-4 py-2 text-gray-800">
                     {PREVIOUS_READING}
                   </td>
