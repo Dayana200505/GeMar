@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import * as XLSX from 'xlsx';
 
 import CurrentReadingModal from '../components/CurrentReadingModal';
 import ReadingInputModal from '../components/ReadingInputModal';
+import SaveSuccessModal from '../components/SaveSuccessModal';
+import ExportSuccessModal from '../components/ExportSuccessModal ';
+
 
 const departments = [
   'PB-A', 'PB-B', '1-A', '1-B', '2-A', '2-B', '3-A', '3-B',
@@ -13,16 +17,23 @@ const PREVIOUS_READING = 10.02;
 
 const GenerarReportes = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [readingInputs, setReadingInputs] = useState({
-    lectura1: '',
-    lectura2: '',
-    total: null,
-  });
+  const [readingInputs, setReadingInputs] = useState({ lectura1: '', lectura2: '', total: null });
   const [totalReading, setTotalReading] = useState(null);
   const [currentReadings, setCurrentReadings] = useState({});
   const [currentDeptIndex, setCurrentDeptIndex] = useState(0);
   const [showReadingModal, setShowReadingModal] = useState(true);
   const [showCurrentModal, setShowCurrentModal] = useState(false);
+  const [showSaveSuccessModal, setShowSaveSuccessModal] = useState(false);
+  const [showExportSuccessModal, setShowExportSuccessModal] = useState(false);
+
+  const textVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.8, ease: 'easeOut' },
+    },
+  };
 
   const consumptionData = departments.map(dept => {
     const current = parseFloat(currentReadings[dept]) || 0;
@@ -30,17 +41,11 @@ const GenerarReportes = () => {
     return { dept, current, consumption };
   });
 
-  const totalConsumption = consumptionData
-    .reduce((sum, data) => sum + (parseFloat(data.consumption) || 0), 0)
-    .toFixed(2);
-
-  const unitPrice = totalReading && totalConsumption
-    ? (parseFloat(totalReading) / parseFloat(totalConsumption)).toFixed(2)
-    : 0;
+  const totalConsumption = consumptionData.reduce((sum, data) => sum + (parseFloat(data.consumption) || 0), 0).toFixed(2);
+  const unitPrice = totalReading && totalConsumption ? (parseFloat(totalReading) / parseFloat(totalConsumption)).toFixed(2) : 0;
 
   const getPeriodo = (fecha) => {
-    const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", 
-                   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+    const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
     const d = new Date(fecha);
     if (isNaN(d)) return '';
     const mes2 = meses[d.getMonth()];
@@ -67,50 +72,58 @@ const GenerarReportes = () => {
     setShowCurrentModal(true);
   };
 
-
   const handleCurrentReadingSubmit = (reading) => {
-    setCurrentReadings(prev => ({
-      ...prev,
-      [departments[currentDeptIndex]]: reading,
-    }));
-  
-    // Avanza al siguiente automáticamente
+    setCurrentReadings(prev => ({ ...prev, [departments[currentDeptIndex]]: reading }));
     if (currentDeptIndex < departments.length - 1) {
       setCurrentDeptIndex(prev => prev + 1);
     } else {
-      setShowCurrentModal(false); // último departamento
+      setShowCurrentModal(false);
     }
   };
-  const textVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.8, ease: 'easeOut' },
-    },
+
+  const handleSave = () => {
+    setShowSaveSuccessModal(true);
+    setTimeout(() => setShowSaveSuccessModal(false), 2000);
+  };
+
+  const handleExportToExcel = () => {
+    const wsData = [
+      ['FECHA', 'DPTO', 'LECTURA 1', 'LECTURA 2', 'TOTAL LECTURA', 'ACTUAL', 'ANTERIOR', 'CONSUMO', 'PRECIO CUBO', 'TOTAL Bs', 'TOTAL Bs (Redondeado)'],
+      ...consumptionData.map(data => {
+        const totalBs = data.consumption ? (parseFloat(data.consumption) * unitPrice).toFixed(2) : '';
+        const roundedTotal = totalBs ? Math.round(totalBs) : '';
+        return [
+          formatFecha(selectedDate),
+          data.dept,
+          readingInputs.lectura1,
+          readingInputs.lectura2,
+          readingInputs.total,
+          data.current !== '' && data.current !== undefined ? parseFloat(data.current).toFixed(2) : '',
+          PREVIOUS_READING,
+          data.consumption,
+          unitPrice,
+          totalBs,
+          roundedTotal
+        ];
+      })
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Reporte_${getPeriodo(selectedDate)}`);
+    XLSX.writeFile(wb, `Reporte_${getPeriodo(selectedDate)}.xlsx`);
+    setShowExportSuccessModal(true);
+    setTimeout(() => setShowExportSuccessModal(false), 2000);
   };
 
   return (
     <div className="min-h-screen bg-gray-100 p-6 sm:p-10 md:p-20">
-      <ReadingInputModal
-        isOpen={showReadingModal}
-        onClose={() => setShowReadingModal(false)}
-        onSubmit={handleReadingSubmit}
-      />
-      
-      <CurrentReadingModal
-        isOpen={showCurrentModal}
-        onClose={() => setShowCurrentModal(false)}
-        onSubmit={handleCurrentReadingSubmit}
-        department={departments[currentDeptIndex]}
-      />
+      <ReadingInputModal isOpen={showReadingModal} onClose={() => setShowReadingModal(false)} onSubmit={handleReadingSubmit} />
+      <CurrentReadingModal isOpen={showCurrentModal} onClose={() => setShowCurrentModal(false)} onSubmit={handleCurrentReadingSubmit} department={departments[currentDeptIndex]} />
+      <SaveSuccessModal isOpen={showSaveSuccessModal} onClose={() => setShowSaveSuccessModal(false)} message="¡Se guardó exitosamente!" />
+      <ExportSuccessModal isOpen={showExportSuccessModal} onClose={() => setShowExportSuccessModal(false)} message="¡Se descargó correctamente!" />
 
-      <motion.div
-        className="flex items-center justify-center mb-8"
-        variants={textVariants}
-        initial="hidden"
-        animate="visible"
-      >
+      <motion.div className="flex items-center justify-center mb-8" variants={textVariants} initial="hidden" animate="visible">
         <h1 className="text-3xl sm:text-4xl font-bold text-[#A31621] font-[Poppins] text-center">
           Informe del Mes: {getPeriodo(selectedDate)}
         </h1>
@@ -121,6 +134,11 @@ const GenerarReportes = () => {
         <p>Lectura 1: <span className="font-medium">{readingInputs.lectura1 || '--'}</span></p>
         <p>Lectura 2: <span className="font-medium">{readingInputs.lectura2 || '--'}</span></p>
         <p>Total: <span className="font-medium">{readingInputs.total || '--'}</span></p>
+      </div>
+
+      <div className="mb-4 flex justify-end space-x-4">
+        <button className="bg-[#162c3b] text-white px-4 py-2 rounded hover:bg-[#A31621] transition-colors" onClick={handleSave}>Guardar</button>
+        <button className="bg-[#162c3b] text-white px-4 py-2 rounded hover:bg-[#A31621] transition-colors" onClick={handleExportToExcel}>Descargar Excel</button>
       </div>
 
       <div className="overflow-x-auto shadow-lg rounded-lg">
@@ -141,41 +159,16 @@ const GenerarReportes = () => {
             {consumptionData.map((data, index) => {
               const totalBs = data.consumption ? (parseFloat(data.consumption) * unitPrice).toFixed(2) : '';
               const roundedTotal = totalBs ? Math.round(totalBs) : '';
-
               return (
                 <tr key={index} className="hover:bg-gray-50 transition-colors">
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">
-                    {formatFecha(selectedDate)}
-                  </td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800 font-medium">
-                    {data.dept}
-                  </td>
-                  <td
-                  className="border border-gray-300 px-4 py-2 text-gray-800 cursor-pointer hover:underline"
-                  onClick={() => {
-                    setCurrentDeptIndex(index);
-                    setShowCurrentModal(true);
-                  }}
-                >
-                  {data.current !== '' && data.current !== undefined
-                    ? parseFloat(data.current).toFixed(2)
-                    : ''}
-                </td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">
-                    {PREVIOUS_READING}
-                  </td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">
-                    {data.consumption}
-                  </td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">
-                    {unitPrice}
-                  </td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">
-                    {totalBs}
-                  </td>
-                  <td className="border border-gray-300 px-4 py-2 text-gray-800">
-                    {roundedTotal}
-                  </td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800">{formatFecha(selectedDate)}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800 font-medium">{data.dept}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800 cursor-pointer hover:underline" onClick={() => { setCurrentDeptIndex(index); setShowCurrentModal(true); }}>{data.current !== '' && data.current !== undefined ? parseFloat(data.current).toFixed(2) : ''}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800">{PREVIOUS_READING}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800">{data.consumption}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800">{unitPrice}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800">{totalBs}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-gray-800">{roundedTotal}</td>
                 </tr>
               );
             })}
@@ -183,15 +176,8 @@ const GenerarReportes = () => {
               <td colSpan="4" className="border border-gray-300 px-4 py-2 text-right">Total:</td>
               <td className="border border-gray-300 px-4 py-2">{totalConsumption}</td>
               <td className="border border-gray-300 px-4 py-2"></td>
-              <td className="border border-gray-300 px-4 py-2">
-                {consumptionData.reduce((sum, data) => sum + (parseFloat(data.consumption) * unitPrice || 0), 0).toFixed(2)}
-              </td>
-              <td className="border border-gray-300 px-4 py-2">
-                {consumptionData.reduce((sum, data) => {
-                  const totalBs = parseFloat(data.consumption) * unitPrice || 0;
-                  return sum + (totalBs ? Math.round(totalBs) : 0);
-                }, 0)}
-              </td>
+              <td className="border border-gray-300 px-4 py-2">{consumptionData.reduce((sum, data) => sum + (parseFloat(data.consumption) * unitPrice || 0), 0).toFixed(2)}</td>
+              <td className="border border-gray-300 px-4 py-2">{consumptionData.reduce((sum, data) => { const totalBs = parseFloat(data.consumption) * unitPrice || 0; return sum + (totalBs ? Math.round(totalBs) : 0); }, 0)}</td>
             </tr>
           </tbody>
         </table>
