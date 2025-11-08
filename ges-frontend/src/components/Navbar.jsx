@@ -15,7 +15,7 @@ export default function Navbar() {
   return (
     <nav className="bg-[#A31621] fixed top-0 w-full z-50 shadow-md">
       <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-        <div className="text-2xl font-bold text-[#FCF7F8]">Mar del Plata</div>
+        <div className="text-xl font-bold text-[#FCF7F8]">Mar del Plata</div>
 
         {/* Desktop */}
         <ul className="hidden md:flex space-x-8">

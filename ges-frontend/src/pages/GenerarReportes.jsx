@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import readingService from '../services/readingService';
 
 import CurrentReadingModal from '../components/CurrentReadingModal';
 import ReadingInputModal from '../components/ReadingInputModal';
 import SaveSuccessModal from '../components/SaveSuccessModal';
-import ExportSuccessModal from '../components/ExportSuccessModal ';
 import PreviousReadingModal from '../components/PreviousReadingModal';
 
 
@@ -14,7 +14,7 @@ const DEPARTMENTS = [
   'PB-A', 'PB-B', '1-A', '1-B', '2-A', '2-B', '3-A', '3-B',
   '4-A', '4-B', '5-A', '5-B', '6-A', '6-B', 'GENERAL',
 ];
-const MODAL_TIMEOUT = 2000; // 2 seconds
+const MODAL_TIMEOUT = 2000;
 const TEMPLATE_PATH = 'plantillas/PlantillaGeMar.xlsx';
 
 const textVariants = {
@@ -26,22 +26,44 @@ const textVariants = {
   },
 };
 
-
-
 const GenerarReportes = () => {
   // State management
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [previousReadings, setPreviousReadings] = useState({}); // Store previous readings per department
+  const [previousReadings, setPreviousReadings] = useState({});
   const [readingInputs, setReadingInputs] = useState({ lectura1: '', lectura2: '', total: null });
   const [totalReading, setTotalReading] = useState(null);
   const [currentReadings, setCurrentReadings] = useState({});
   const [currentDeptIndex, setCurrentDeptIndex] = useState(0);
   const [showPreviousReadingModal, setShowPreviousReadingModal] = useState(false);
-  const [selectedDepartment, setSelectedDepartment] = useState(null); // Track department for previous reading modal
+  const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [showReadingModal, setShowReadingModal] = useState(false);
   const [showCurrentModal, setShowCurrentModal] = useState(false);
   const [showSaveSuccessModal, setShowSaveSuccessModal] = useState(false);
   const [showExportSuccessModal, setShowExportSuccessModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [savedReadingId, setSavedReadingId] = useState(null);
+
+  // Cargar lectura anterior automáticamente cuando se selecciona un departamento
+  useEffect(() => {
+    if (selectedDepartment) {
+      loadPreviousReading(selectedDepartment);
+    }
+  }, [selectedDepartment]);
+
+  // Función para cargar lectura anterior desde la BD
+  const loadPreviousReading = async (department) => {
+    try {
+      const response = await readingService.getPreviousReading(department);
+      if (response.success) {
+        setPreviousReadings(prev => ({ 
+          ...prev, 
+          [department]: response.data.previous_reading 
+        }));
+      }
+    } catch (error) {
+      console.log('No hay lectura anterior para este departamento');
+    }
+  };
 
   // Derived data
   const consumptionData = DEPARTMENTS.map(dept => {
@@ -104,14 +126,57 @@ const GenerarReportes = () => {
     }
   };
 
-  const handleSave = () => {
-    setShowSaveSuccessModal(true);
-    setTimeout(() => setShowSaveSuccessModal(false), MODAL_TIMEOUT);
+  // Guardar en base de datos
+  const handleSave = async () => {
+    setLoading(true);
+    
+    try {
+      // Preparar datos para enviar
+      const departments = DEPARTMENTS.map(dept => ({
+        department: dept,
+        current_reading: parseFloat(currentReadings[dept]) || 0,
+        previous_reading: parseFloat(previousReadings[dept]) || 0,
+      })).filter(dept => dept.current_reading > 0); // Solo enviar departamentos con lectura
+
+      if (departments.length === 0) {
+        alert('Por favor, ingrese al menos una lectura de departamento');
+        setLoading(false);
+        return;
+      }
+
+      const readingData = {
+        reading_date: selectedDate.toISOString().split('T')[0],
+        lectura1: parseFloat(readingInputs.lectura1) || 0,
+        lectura2: parseFloat(readingInputs.lectura2) || 0,
+        periodo: getPeriodo(selectedDate),
+        departments: departments,
+      };
+
+      // Guardar en la base de datos
+      let response;
+      if (savedReadingId) {
+        // Actualizar si ya existe
+        response = await readingService.updateReading(savedReadingId, readingData);
+      } else {
+        // Crear nuevo
+        response = await readingService.saveReading(readingData);
+        setSavedReadingId(response.data.id);
+      }
+
+      if (response.success) {
+        setShowSaveSuccessModal(true);
+        setTimeout(() => setShowSaveSuccessModal(false), MODAL_TIMEOUT);
+      }
+    } catch (error) {
+      console.error('Error al guardar:', error);
+      alert('Error al guardar en la base de datos: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleExportWithTemplate = async () => {
     try {
-      // 1. Cargar plantilla
       const response = await fetch(TEMPLATE_PATH);
       const arrayBuffer = await response.arrayBuffer();
   
@@ -119,19 +184,16 @@ const GenerarReportes = () => {
       await workbook.xlsx.load(arrayBuffer);
       const worksheet = workbook.getWorksheet(1);
   
-      // 2. Título del informe
       worksheet.getCell('E1').value = `Mes del informe: ${getPeriodo(selectedDate)}`;
       worksheet.getCell('E1').font = { bold: true, size: 14 };
       worksheet.getCell('E1').alignment = { vertical: 'middle', horizontal: 'left' };
   
-      // 3. Insertar datos
       let totalConsumo = 0;
       let totalBs = 0;
       let totalBsRedondeado = 0;
   
       consumptionData.forEach((data, index) => {
         const fila = index + 3;
-  
         const actual = parseFloat(data.current) || 0;
         const anterior = parseFloat(data.previous) || 0;
         const consumo = parseFloat((actual - anterior).toFixed(2));
@@ -152,7 +214,6 @@ const GenerarReportes = () => {
         totalBsRedondeado += totalFilaRedondeado;
       });
   
-      // 4. Insertar lecturas
       const lectura1 = parseFloat(readingInputs.lectura1) || 0;
       const lectura2 = parseFloat(readingInputs.lectura2) || 0;
       const lecturaTotal = lectura1 + lectura2;
@@ -163,12 +224,10 @@ const GenerarReportes = () => {
       worksheet.getCell('J6').value = parseFloat(totalConsumo.toFixed(2));
       worksheet.getCell('J7').value = totalConsumo !== 0 ? parseFloat((lecturaTotal / totalConsumo).toFixed(2)) : 0;
   
-      // 5. Totales
       worksheet.getCell('E18').value = parseFloat(totalConsumo.toFixed(2));
       worksheet.getCell('G18').value = parseFloat(totalBs.toFixed(2));
       worksheet.getCell('H18').value = totalBsRedondeado;
   
-      // 6. Exportar
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -183,13 +242,53 @@ const GenerarReportes = () => {
       alert('Error al exportar Excel con plantilla.');
     }
   };
-  
-  
+
+  // Cargar datos existentes
+  const handleLoadReading = async () => {
+    const periodo = getPeriodo(selectedDate);
+    try {
+      setLoading(true);
+      const response = await readingService.getReadingByPeriodo(periodo);
+      
+      if (response.success && response.data) {
+        const data = response.data;
+        
+        // Cargar lecturas principales
+        setReadingInputs({
+          lectura1: data.lectura1,
+          lectura2: data.lectura2,
+          total: data.total_reading
+        });
+        setTotalReading(data.total_reading);
+        setSavedReadingId(data.id);
+        
+        // Cargar lecturas de departamentos
+        const currentReadingsObj = {};
+        const previousReadingsObj = {};
+        
+        data.department_readings.forEach(dept => {
+          currentReadingsObj[dept.department] = dept.current_reading;
+          previousReadingsObj[dept.department] = dept.previous_reading;
+        });
+        
+        setCurrentReadings(currentReadingsObj);
+        setPreviousReadings(previousReadingsObj);
+        
+        alert('Datos cargados exitosamente');
+      }
+    } catch (error) {
+      console.log('No hay datos guardados para este periodo');
+      alert('No hay datos guardados para este periodo');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Render
   return (
     <div className="min-h-screen bg-gray-100 p-6 sm:p-10 md:p-20">
       {/* Modals */}
-      <PreviousReadingModal 
+      <PreviousReadingModal
         isOpen={showPreviousReadingModal} 
         onClose={() => setShowPreviousReadingModal(false)} 
         onSubmit={handlePreviousReadingSubmit}
@@ -211,7 +310,7 @@ const GenerarReportes = () => {
         onClose={() => setShowSaveSuccessModal(false)} 
         message="¡Se guardó exitosamente!" 
       />
-      <ExportSuccessModal
+      <showExportSuccessModal
         isOpen={showExportSuccessModal} 
         onClose={() => setShowExportSuccessModal(false)} 
         message="¡Se descargó correctamente!" 
@@ -229,39 +328,47 @@ const GenerarReportes = () => {
         </h1>
       </motion.div>
 
-     {/* Readings Display */}
-<div className="mb-4 bg-white p-3 rounded-lg shadow-sm">
-  <div className="flex items-center justify-between mb-3">
-    <h2 className="text-base font-semibold text-[#162c3b]">Lecturas Ingresadas</h2>
-  </div>
-  <div className="text-sm text-gray-700 grid grid-cols-3 gap-y-1">
-    <p>Lectura 1: <span className="font-medium">{readingInputs.lectura1 || '--'}</span></p>
-    <p>Lectura 2: <span className="font-medium">{readingInputs.lectura2 || '--'}</span></p>
-    <p>Total: <span className="font-medium">{readingInputs.total || '--'}</span></p>
-  </div>
+      {/* Readings Display */}
+      <div className="mb-4 bg-white p-3 rounded-lg shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-semibold text-[#162c3b]">Lecturas Ingresadas</h2>
+        </div>
+        <div className="text-sm text-gray-700 grid grid-cols-3 gap-y-1">
+          <p>Lectura 1: <span className="font-medium">{readingInputs.lectura1 || '--'}</span></p>
+          <p>Lectura 2: <span className="font-medium">{readingInputs.lectura2 || '--'}</span></p>
+          <p>Total: <span className="font-medium">{readingInputs.total || '--'}</span></p>
+        </div>
 
-  {/* Action Buttons */}
-  <div className="flex flex-wrap justify-end gap-2 mt-4">
-    <button 
-      className="bg-[#162c3b] text-white px-3 py-1.5 rounded text-sm hover:bg-[#1f3e56] transition-colors"
-      onClick={() => setShowReadingModal(true)}
-    >
-      Ingresar Lecturas
-    </button>
-    <button 
-      className="bg-[#A31621] text-white px-3 py-1.5 rounded text-sm hover:bg-[#c4313b] transition-colors"
-      onClick={handleSave}
-    >
-      Guardar
-    </button>
-    <button 
-      className="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700 transition-colors"
-      onClick={handleExportWithTemplate}
-    >
-      Descargar Excel
-    </button>
-  </div>
-</div>
+        {/* Action Buttons */}
+        <div className="flex flex-wrap justify-end gap-2 mt-4">
+          <button 
+            className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 transition-colors"
+            onClick={handleLoadReading}
+            disabled={loading}
+          >
+            {loading ? 'Cargando...' : 'Cargar Datos'}
+          </button>
+          <button 
+            className="bg-[#162c3b] text-white px-3 py-1.5 rounded text-sm hover:bg-[#1f3e56] transition-colors"
+            onClick={() => setShowReadingModal(true)}
+          >
+            Ingresar Lecturas
+          </button>
+          <button 
+            className="bg-[#A31621] text-white px-3 py-1.5 rounded text-sm hover:bg-[#c4313b] transition-colors"
+            onClick={handleSave}
+            disabled={loading}
+          >
+            {loading ? 'Guardando...' : 'Guardar'}
+          </button>
+          <button 
+            className="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700 transition-colors"
+            onClick={handleExportWithTemplate}
+          >
+            Descargar Excel
+          </button>
+        </div>
+      </div>
 
       {/* Consumption Table */}
       <div className="overflow-x-auto shadow-lg rounded-lg">
